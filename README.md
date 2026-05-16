@@ -1,96 +1,101 @@
 # cross-agent-handoff
 
-> 跨 AI 编码工具的一键会话交接 — Codex、Claude Code、Gemini/Antigravity 之间无缝切换。
+Compact cross-agent handoff skills for Codex, Claude Code, Gemini, and Antigravity.
 
-## 解决什么问题
+The goal is not to serialize an entire project into the prompt. The goal is to write a small, reliable map: project identity, exact file anchors, decisions, current state, unknowns, and next safe steps.
 
-用 Codex 写到一半额度耗尽，或者 Claude Code 的上下文快满了——想在另一个工具里接着干，但会话状态全丢了。
+## Skills
 
-`/save` 10 秒内把当前任务、改动文件、决策、下一步写到一个共享文件，切到另一个工具 `/load` 立刻继续。
+- `/save` or "交班": writes `C:\Users\11817\.agents\session-handoff.md`
+- `/load` or "接班": reads that file, validates the workspace, restores only targeted context, then continues safely
 
-## 安装
+## Why v1.1 Exists
+
+The original version was very token-efficient, but too sparse. A short handoff can cause drift when the next agent:
+
+- resumes in the wrong repo or branch
+- misses the project/component boundary
+- translates or paraphrases exact identifiers
+- treats unverified assumptions as facts
+- skips risks that should require confirmation
+
+Version 1.1 keeps the handoff compact while adding:
+
+- project anchors: workspace, repo root, branch, HEAD, key files
+- current state split into done, verified, not verified, blocked
+- a context rehydration pack with 3-7 files/searches to read first
+- explicit unknowns and watch-outs
+- load-time validation before editing
+
+## Handoff File
+
+Shared path:
+
+```text
+C:\Users\11817\.agents\session-handoff.md
+```
+
+Core sections:
+
+```markdown
+# Session Handoff
+**Time**: <ISO timestamp with timezone>
+**Source**: <agent/tool>
+**Workspace**: <cwd>
+**Repo Root**: <git root>
+**Branch / HEAD**: <branch> @ <sha>
+**Handoff Profile**: <compact | expanded>
+**User Language**: <reply language>
+
+## Current Task
+## Project Anchors
+## Changed Files
+## Decisions
+## Current State
+## Next Steps
+## Context Rehydration Pack
+## Watch Out
+```
+
+## Install
+
+Clone the source repo:
 
 ```bash
 git clone https://github.com/k9ight000/cross-agent-handoff.git ~/Desktop/cross-agent-handoff
 ```
 
-然后将 skills 目录 symlink 到各工具的 skills 目录：
+Then copy or symlink `skills/save` and `skills/load` into each agent's skills directory:
 
-```bash
-# Claude Code
-ln -s ~/Desktop/cross-agent-handoff/skills/save ~/.claude/skills/save
-ln -s ~/Desktop/cross-agent-handoff/skills/load ~/.claude/skills/load
-
-# Codex
-ln -s ~/Desktop/cross-agent-handoff/skills/save ~/.codex/skills/save
-ln -s ~/Desktop/cross-agent-handoff/skills/load ~/.codex/skills/load
-
-# Google Antigravity
-ln -s ~/Desktop/cross-agent-handoff/skills/save ~/.antigravity/skills/save
-ln -s ~/Desktop/cross-agent-handoff/skills/load ~/.antigravity/skills/load
-
-# Gemini / Google IDE
-ln -s ~/Desktop/cross-agent-handoff/skills/save ~/.gemini/skills/save
-ln -s ~/Desktop/cross-agent-handoff/skills/load ~/.gemini/skills/load
+```text
+~/.agents/skills/save
+~/.agents/skills/load
+~/.codex/skills/save
+~/.codex/skills/load
+~/.claude/skills/save
+~/.claude/skills/load
+~/.antigravity/skills/save
+~/.antigravity/skills/load
+~/.gemini/skills/save
+~/.gemini/skills/load
 ```
 
-再把启动自动检查策略写入跨工具配置 `~/.agents/AGENTS.md`：
+## Usage Loop
 
-```markdown
-## Session Handoff Policy
-
-At session startup, check for a handoff file:
-`C:\Users\<user>\.agents\session-handoff.md`
-
-If the file exists and was written within the last 24 hours:
-- Read it and present a brief summary
-- Ask whether to continue from the Next Steps listed
+```text
+working in one agent
+  -> /save
+  -> switch to another agent
+  -> /load or "接班"
+  -> agent validates repo/branch/files
+  -> agent reads only targeted context
+  -> continue
 ```
 
-## 用法
+## Design Rules
 
-```
-写代码中... 感觉到额度快不够了
-    ↓
-/save          →  存档到 ~/.agents/session-handoff.md
-    ↓
-切到另一个工具
-    ↓
-/load          →  自动读取、展示摘要、确认后继续干活
-```
-
-**关键**：`/save` 要在额度还活着的时候跑。如果已经耗尽没来得及保存 — Codex 的会话 JSONL 文件在 `~/.codex/sessions/` 里，另一个工具可以直接读取来重建上下文。
-
-## 手交班文件格式
-
-`~/.agents/session-handoff.md`：
-
-```markdown
-# Session Handoff
-**Time**: 2026-05-09T01:40+08:00
-**Source**: Claude Code
-
-## Current Task
-<1-2 lines>
-
-## Changed Files
-<git status summary>
-
-## Decisions
-- <decision + why>
-
-## Next Steps
-1. <step 1>
-2. <step 2>
-```
-
-## 设计原则
-
-- **快**：不读文件、不跑测试、不联网，控制在 10 秒 / 500 tokens 内
-- **简**：一个共享文件，覆盖写入，不是日志系统
-- **跨工具**：只依赖文件系统，不依赖任何工具的专有 API
-- **兜底**：即使忘了 /save，Codex 的会话 JSONL 也是可读的
-
-## License
-
-MIT
+- Compact by default: 50-120 lines.
+- Expanded only when needed: up to about 200 lines.
+- Never include secrets, cookies, tokens, full logs, full diffs, or private page text.
+- Preserve exact identifiers. Do not translate filenames, commands, APIs, selectors, or error strings.
+- Treat the handoff as a map, not proof. The receiving agent verifies anchors before acting.

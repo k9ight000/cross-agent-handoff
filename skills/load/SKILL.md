@@ -1,47 +1,97 @@
 ---
 name: load
-version: 1.0.0
-description: Load a cross-agent session handoff from `C:\Users\11817\.agents\session-handoff.md` and continue the work. Use when starting a new session in Claude Code or Codex after `/save` was run.
+version: 1.1.0
+description: Use when the user says /load, resume, continue from handoff, switch agents/tools, 接班, or a new session needs to pick up from C:\Users\11817\.agents\session-handoff.md.
 ---
 
-# /load — Resume Cross-Agent Session
+# /load - Resume Cross-Agent Session
 
-Read the handoff file and resume where the previous session left off.
+## Goal
 
-## Step 1: Check for Handoff
+Resume from the shared handoff without pretending it is the whole project. The handoff is a map. Verify the map against the current workspace, then restore only the context needed for the next safe step.
+
+## Step 1: Read the Handoff
+
+Read:
+
+`C:\Users\11817\.agents\session-handoff.md`
+
+Shell equivalents:
 
 ```bash
 cat "$HOME/.agents/session-handoff.md" 2>/dev/null || echo "NO_HANDOFF"
 ```
 
-If `NO_HANDOFF` — reply:
+PowerShell:
 
-> 没有找到手交班文件。你是从 Codex 切过来的吗？描述一下你在做什么，我直接开始。
-
-Stop there.
-
-## Step 2: Parse and Present
-
-Read the handoff file content. Present a concise summary to the user:
-
-```
-从手交班文件读到了：
-
-<Current Task 内容>
-
-Next Steps:
-1. ...
-2. ...
-
-开始执行 Next Steps 吗？
+```powershell
+Get-Content "$env:USERPROFILE\.agents\session-handoff.md" -ErrorAction SilentlyContinue
 ```
 
-## Step 3: Resume
+If no handoff exists, reply:
 
-If user confirms, start working on the Next Steps in order. Reference the Decisions and Changed Files sections as needed.
+`没有找到交班文件。你告诉我当前任务和项目路径，我直接接着做。`
 
-## Rules
+Then stop.
 
-- Don't re-do work already listed as done in Changed Files.
-- If the handoff is more than 24 hours old, mention that and ask if anything changed since.
-- Once work resumes, you can overwrite the handoff by running `/save` again at any pause point.
+## Step 2: Validate the Map
+
+Before acting, compare the handoff with the current environment:
+
+- Handoff age: if older than 24 hours, mention the date and treat it as potentially stale.
+- Workspace and repo root: if the current directory differs, say so and either switch only if obvious, or ask.
+- Branch / HEAD: if the current branch or commit differs from the handoff, report the difference before modifying files.
+- Changed files: check `git status --short` when inside a repo.
+- User language: continue in the user's preferred language, but preserve exact identifiers in their original spelling.
+
+Never translate or paraphrase exact filenames, commands, API names, environment variables, branch names, error strings, selectors, or IDs.
+
+## Step 3: Brief the User
+
+Present a concise briefing:
+
+```markdown
+从交班文件读到：
+- Current Task: <summary>
+- Current State: <done / verified / not verified>
+- Next Steps: <first 2-3 steps>
+- Watch Out: <risks or confirmations needed>
+- Unknowns: <facts that still need checking>
+```
+
+If the user explicitly said `/load`, `接班`, or asked you to continue, proceed after the briefing unless the next action is destructive, externally visible, costly, or otherwise high-risk. For high-risk actions, ask for explicit confirmation first.
+
+## Step 4: Targeted Context Rehydration
+
+Read only what the handoff points to, then expand only if evidence requires it.
+
+Default budget:
+
+- Read first: 3 files/sections maximum.
+- Expanded budget: up to 7 files/sections for complex handoffs.
+- Prefer `rg` for symbols and exact phrases before opening broad files.
+- Prefer `git status --short`, `git diff --stat`, and narrow diffs over full logs.
+
+Use this order:
+
+1. Read `Project Anchors` and `Context Rehydration Pack`.
+2. Verify repo/branch/status.
+3. Open the listed "Read first" files or run the listed searches.
+4. Compare what you find against `Decisions`, `Current State`, and `Next Steps`.
+5. If something conflicts, say the conflict and resolve it before editing.
+
+Do not read the entire repository, entire chat history, full logs, or full diffs unless the user asks or the handoff cannot be safely interpreted without it.
+
+## Step 5: Resume Work
+
+Start with the first safe `Next Steps` item that is not already complete.
+
+Rules:
+
+- Treat `Verified` as evidence, but re-run checks when the code may have changed.
+- Treat `Not verified` and `Unknowns` as tasks to resolve, not as facts.
+- Do not redo work already listed as complete unless verification contradicts it.
+- Do not perform delete, overwrite, commit, push, submit, send-message, payment, application, or other high-risk actions without explicit user confirmation.
+- If you discover the handoff is wrong or stale, update your plan and tell the user briefly.
+
+When you make meaningful progress or hit a new pause point, run `/save` again so the next handoff reflects the new state.
